@@ -1,6 +1,6 @@
 use crate::config::{CrawlConfig, CrawlResult};
 use crate::crawler::Crawler;
-use crate::crawler::browser;
+use crate::crawler::browser::{self, CrawlCookie};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,9 @@ pub struct CrawlUrlInput {
     /// Milliseconds to wait after page load for JS rendering (default: 1500)
     #[serde(default = "default_wait_ms")]
     pub wait_ms: u64,
+    /// Cookies to inject before navigation (for authenticated crawling)
+    #[serde(default)]
+    pub cookies: Vec<CrawlCookie>,
 }
 
 fn default_timeout() -> u64 {
@@ -61,6 +64,8 @@ pub struct ExtractContentInput {
     pub render: bool,
     #[serde(default)]
     pub proxy: Option<String>,
+    #[serde(default)]
+    pub cookies: Vec<CrawlCookie>,
 }
 
 /// MCP tool: screenshot — take full-page screenshot
@@ -71,6 +76,8 @@ pub struct ScreenshotInput {
     pub proxy: Option<String>,
     #[serde(default = "default_wait_ms")]
     pub wait_ms: u64,
+    #[serde(default)]
+    pub cookies: Vec<CrawlCookie>,
 }
 
 /// MCP tool: render_batch — render multiple URLs in parallel with headless Chrome
@@ -83,6 +90,40 @@ pub struct RenderBatchInput {
     pub wait_ms: u64,
     #[serde(default = "default_concurrent")]
     pub max_concurrent: usize,
+    #[serde(default)]
+    pub cookies: Vec<CrawlCookie>,
+}
+
+/// MCP tool: login — perform API-based login and return session tokens
+#[derive(Debug, Deserialize)]
+pub struct LoginInput {
+    /// Login page URL (used to determine origin) or direct API endpoint URL
+    pub url: String,
+    pub email: String,
+    pub password: String,
+    /// Direct API login endpoint URL (overrides auto-detection from url)
+    #[serde(default)]
+    pub api_url: Option<String>,
+    #[serde(default)]
+    pub proxy: Option<String>,
+    #[serde(default = "default_wait_ms")]
+    pub wait_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LoginOutput {
+    pub success: bool,
+    pub cookies: Vec<CookieInfo>,
+    pub final_url: String,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CookieInfo {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
 }
 
 fn default_concurrent() -> usize {
@@ -132,8 +173,8 @@ pub struct RenderBatchItem {
 
 /// Execute crawl_url tool
 pub async fn exec_crawl_url(input: CrawlUrlInput) -> Result<CrawlResult> {
-    if input.render {
-        browser::render_page(&input.url, input.proxy.as_deref(), input.wait_ms).await
+    if input.render || !input.cookies.is_empty() {
+        browser::render_page(&input.url, input.proxy.as_deref(), input.wait_ms, &input.cookies).await
     } else {
         let config = CrawlConfig {
             timeout: std::time::Duration::from_secs(input.timeout_secs),
@@ -152,18 +193,39 @@ pub async fn exec_extract_content(input: ExtractContentInput) -> Result<CrawlRes
         render: input.render,
         proxy: input.proxy,
         wait_ms: default_wait_ms(),
+        cookies: input.cookies,
     })
     .await
 }
 
 /// Execute screenshot tool
 pub async fn exec_screenshot(input: ScreenshotInput) -> Result<ScreenshotOutput> {
-    let png_bytes = browser::screenshot(&input.url, input.proxy.as_deref(), input.wait_ms).await?;
+    let png_bytes = browser::screenshot(&input.url, input.proxy.as_deref(), input.wait_ms, &input.cookies).await?;
     let png_base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes);
     Ok(ScreenshotOutput {
         url: input.url,
         size_bytes: png_bytes.len(),
         png_base64,
+    })
+}
+
+/// Execute login tool — API-based login, returns session tokens
+pub async fn exec_login(input: LoginInput) -> Result<LoginOutput> {
+    let start = std::time::Instant::now();
+    let (cookies, final_url) = browser::login_and_get_cookies(
+        &input.url,
+        &input.email,
+        &input.password,
+        input.proxy.as_deref(),
+        input.wait_ms,
+        input.api_url.as_deref(),
+    ).await?;
+
+    Ok(LoginOutput {
+        success: true,
+        cookies,
+        final_url,
+        elapsed_ms: start.elapsed().as_millis() as u64,
     })
 }
 
@@ -175,6 +237,7 @@ pub async fn exec_render_batch(input: RenderBatchInput) -> Result<RenderBatchOut
         input.proxy.as_deref(),
         input.wait_ms,
         input.max_concurrent,
+        &input.cookies,
     )
     .await;
 

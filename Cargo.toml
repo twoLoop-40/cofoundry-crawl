@@ -49,5 +49,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Base64 for screenshot encoding
 base64 = "0.22"
 
+# URL encoding for form data
+urlencoding = "2"
+
 [dev-dependencies]
 wiremock = "0.6"

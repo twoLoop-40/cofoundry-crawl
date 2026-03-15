@@ -3,7 +3,7 @@
 //! Protocol: newline-delimited JSON. Each message is a single compact JSON line.
 //! Server reads from stdin, writes to stdout, logs to stderr.
 //!
-//! Tools: crawl_url, extract_content, search_site, screenshot, render_batch
+//! Tools: crawl_url, extract_content, search_site, screenshot, render_batch, login
 
 use super::tools;
 use anyhow::Result;
@@ -51,8 +51,27 @@ impl JsonRpcResponse {
 
 // ─── Shared schema fragments ───
 
-fn render_props() -> Value {
+fn cookie_prop() -> Value {
     serde_json::json!({
+        "cookies": {
+            "type": "array",
+            "description": "Cookies to inject before navigation (for authenticated crawling). Get cookies via the login tool first.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "value": { "type": "string" },
+                    "domain": { "type": "string" },
+                    "path": { "type": "string" }
+                },
+                "required": ["name", "value"]
+            }
+        }
+    })
+}
+
+fn render_props() -> Value {
+    let mut props = serde_json::json!({
         "render": {
             "type": "boolean",
             "description": "Use headless Chrome for JavaScript rendering (SPA support). Default: false",
@@ -67,7 +86,12 @@ fn render_props() -> Value {
             "description": "Milliseconds to wait after page load for JS rendering (default: 1500)",
             "default": 1500
         }
-    })
+    });
+    // Merge cookie prop
+    if let (Some(p), Some(c)) = (props.as_object_mut(), cookie_prop().as_object()) {
+        p.extend(c.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    props
 }
 
 // ─── Tool schemas ───
@@ -122,39 +146,58 @@ fn tool_schema_search_site() -> Value {
 }
 
 fn tool_schema_screenshot() -> Value {
+    let mut props = serde_json::json!({
+        "url": { "type": "string", "description": "The URL to screenshot" },
+        "proxy": { "type": "string", "description": "SOCKS5 proxy for Tor/.onion" },
+        "wait_ms": { "type": "integer", "description": "Wait time for JS rendering (default: 1500ms)", "default": 1500 }
+    });
+    if let (Some(p), Some(c)) = (props.as_object_mut(), cookie_prop().as_object()) {
+        p.extend(c.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
     serde_json::json!({
         "name": "screenshot",
-        "description": "Take a full-page screenshot of a URL using headless Chrome. Returns base64-encoded PNG. Supports Tor proxy.",
+        "description": "Take a full-page screenshot of a URL using headless Chrome. Returns base64-encoded PNG. Supports cookies for authenticated pages.",
+        "inputSchema": { "type": "object", "properties": props, "required": ["url"] }
+    })
+}
+
+fn tool_schema_login() -> Value {
+    serde_json::json!({
+        "name": "login",
+        "description": "Login via API (OAuth2 form-encoded) and return session tokens as localStorage/cookie entries. Use the returned cookies with other tools to crawl authenticated pages. Workflow: 1) call login → get cookies, 2) pass cookies to crawl_url/screenshot/render_batch.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "url": { "type": "string", "description": "The URL to screenshot" },
+                "url": { "type": "string", "description": "Login page URL (used to determine origin)" },
+                "email": { "type": "string", "description": "Email or username" },
+                "password": { "type": "string", "description": "Password" },
+                "api_url": { "type": "string", "description": "Direct API login endpoint URL (overrides auto-detection). E.g., http://localhost:8002/api/v1/auth/login" },
                 "proxy": { "type": "string", "description": "SOCKS5 proxy for Tor/.onion" },
-                "wait_ms": { "type": "integer", "description": "Wait time for JS rendering (default: 1500ms)", "default": 1500 }
+                "wait_ms": { "type": "integer", "description": "Wait time (default: 1500ms)", "default": 1500 }
             },
-            "required": ["url"]
+            "required": ["url", "email", "password"]
         }
     })
 }
 
 fn tool_schema_render_batch() -> Value {
+    let mut props = serde_json::json!({
+        "urls": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "List of URLs to render in parallel"
+        },
+        "proxy": { "type": "string", "description": "SOCKS5 proxy for Tor/.onion" },
+        "wait_ms": { "type": "integer", "description": "Wait time per page (default: 1500ms)", "default": 1500 },
+        "max_concurrent": { "type": "integer", "description": "Max parallel tabs (default: 5)", "default": 5 }
+    });
+    if let (Some(p), Some(c)) = (props.as_object_mut(), cookie_prop().as_object()) {
+        p.extend(c.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
     serde_json::json!({
         "name": "render_batch",
-        "description": "Render multiple URLs in parallel using headless Chrome. Returns content for all pages. Use for high-performance parallel SPA crawling.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "urls": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "List of URLs to render in parallel"
-                },
-                "proxy": { "type": "string", "description": "SOCKS5 proxy for Tor/.onion" },
-                "wait_ms": { "type": "integer", "description": "Wait time per page (default: 1500ms)", "default": 1500 },
-                "max_concurrent": { "type": "integer", "description": "Max parallel tabs (default: 5)", "default": 5 }
-            },
-            "required": ["urls"]
-        }
+        "description": "Render multiple URLs in parallel using headless Chrome. Returns content for all pages. Supports cookies for authenticated crawling.",
+        "inputSchema": { "type": "object", "properties": props, "required": ["urls"] }
     })
 }
 
@@ -202,6 +245,14 @@ async fn handle_tool_call(name: &str, args: Value) -> Result<Value, String> {
             serde_json::to_value(&result)
                 .map_err(|e| format!("Serialization error: {e}"))
         }
+        "login" => {
+            let input: tools::LoginInput = serde_json::from_value(args)
+                .map_err(|e| format!("Invalid arguments for login: {e}"))?;
+            let result = tools::exec_login(input).await
+                .map_err(|e| format!("login failed: {e}"))?;
+            serde_json::to_value(&result)
+                .map_err(|e| format!("Serialization error: {e}"))
+        }
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -234,6 +285,7 @@ async fn handle_request(req: JsonRpcRequest) -> Option<JsonRpcResponse> {
         "tools/list" => {
             let result = serde_json::json!({
                 "tools": [
+                    tool_schema_login(),
                     tool_schema_crawl_url(),
                     tool_schema_extract_content(),
                     tool_schema_search_site(),
@@ -294,7 +346,7 @@ async fn handle_request(req: JsonRpcRequest) -> Option<JsonRpcResponse> {
 
 pub async fn run_mcp_server() -> Result<()> {
     eprintln!("[mcp] cofoundry-crawl v{} MCP server starting (stdio)", env!("CARGO_PKG_VERSION"));
-    eprintln!("[mcp] Tools: crawl_url, extract_content, search_site, screenshot, render_batch");
+    eprintln!("[mcp] Tools: login, crawl_url, extract_content, search_site, screenshot, render_batch");
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
