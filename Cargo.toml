@@ -1,16 +1,20 @@
 [package]
 name = "cofoundry-crawl"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "High-performance web crawler with MCP server interface"
+description = "High-performance web crawler with MCP server — supports SPA rendering and dark web"
 license = "MIT"
 
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+futures = "0.3"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "cookies", "gzip", "brotli"] }
+reqwest = { version = "0.12", features = ["json", "cookies", "gzip", "brotli", "socks"] }
+
+# Headless Chrome (SPA rendering + screenshots)
+chromiumoxide = "0.9"
 
 # HTML parsing
 scraper = "0.22"
@@ -21,9 +25,6 @@ url = "2"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# MCP server
-# rmcp = { version = "1", features = ["server", "transport-io"] }  # TODO: wire up MCP
 
 # Logging
 tracing = "0.1"
@@ -44,6 +45,9 @@ regex = "1"
 
 # Chrono for timestamps
 chrono = { version = "0.4", features = ["serde"] }
+
+# Base64 for screenshot encoding
+base64 = "0.22"
 
 [dev-dependencies]
 wiremock = "0.6"

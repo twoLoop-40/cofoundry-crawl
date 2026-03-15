@@ -2,6 +2,7 @@ pub mod fetcher;
 pub mod frontier;
 pub mod extractor;
 pub mod dedup;
+pub mod browser;
 
 use crate::config::{CrawlConfig, CrawlResult, SiteCrawlResult};
 use anyhow::Result;

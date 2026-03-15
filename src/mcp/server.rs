@@ -2,6 +2,8 @@
 //!
 //! Protocol: newline-delimited JSON. Each message is a single compact JSON line.
 //! Server reads from stdin, writes to stdout, logs to stderr.
+//!
+//! Tools: crawl_url, extract_content, search_site, screenshot, render_batch
 
 use super::tools;
 use anyhow::Result;
@@ -47,44 +49,56 @@ impl JsonRpcResponse {
     }
 }
 
-// ─── Tool schema helpers ───
+// ─── Shared schema fragments ───
 
-fn tool_schema_crawl_url() -> Value {
+fn render_props() -> Value {
     serde_json::json!({
-        "name": "crawl_url",
-        "description": "Fetch a single URL and extract its content as Markdown, links, and metadata. Fast single-page crawl.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL to crawl"
-                },
-                "timeout_secs": {
-                    "type": "integer",
-                    "description": "Timeout in seconds (default: 30)",
-                    "default": 30
-                }
-            },
-            "required": ["url"]
+        "render": {
+            "type": "boolean",
+            "description": "Use headless Chrome for JavaScript rendering (SPA support). Default: false",
+            "default": false
+        },
+        "proxy": {
+            "type": "string",
+            "description": "SOCKS5 proxy URL (e.g., socks5://127.0.0.1:9050 for Tor/.onion sites)"
+        },
+        "wait_ms": {
+            "type": "integer",
+            "description": "Milliseconds to wait after page load for JS rendering (default: 1500)",
+            "default": 1500
         }
     })
 }
 
+// ─── Tool schemas ───
+
+fn tool_schema_crawl_url() -> Value {
+    let mut props = serde_json::json!({
+        "url": { "type": "string", "description": "The URL to crawl" },
+        "timeout_secs": { "type": "integer", "description": "Timeout in seconds (default: 30)", "default": 30 }
+    });
+    // Merge render props
+    if let (Some(p), Some(r)) = (props.as_object_mut(), render_props().as_object()) {
+        p.extend(r.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    serde_json::json!({
+        "name": "crawl_url",
+        "description": "Fetch a URL and extract content as Markdown + links + metadata. Set render=true for SPA/JavaScript sites. Set proxy for Tor/.onion crawling.",
+        "inputSchema": { "type": "object", "properties": props, "required": ["url"] }
+    })
+}
+
 fn tool_schema_extract_content() -> Value {
+    let mut props = serde_json::json!({
+        "url": { "type": "string", "description": "The URL to extract content from" }
+    });
+    if let (Some(p), Some(r)) = (props.as_object_mut(), render_props().as_object()) {
+        p.extend(r.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
     serde_json::json!({
         "name": "extract_content",
-        "description": "Extract structured content (title, markdown, links, metadata) from a URL. Alias for crawl_url focused on content extraction.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL to extract content from"
-                }
-            },
-            "required": ["url"]
-        }
+        "description": "Extract structured content (title, markdown, links, metadata) from a URL. Supports SPA rendering and Tor proxy.",
+        "inputSchema": { "type": "object", "properties": props, "required": ["url"] }
     })
 }
 
@@ -95,26 +109,51 @@ fn tool_schema_search_site() -> Value {
         "inputSchema": {
             "type": "object",
             "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "Starting URL for the site crawl"
-                },
-                "query": {
-                    "type": "string",
-                    "description": "Search keyword to find across pages"
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Maximum crawl depth (default: 2)",
-                    "default": 2
-                },
-                "max_pages": {
-                    "type": "integer",
-                    "description": "Maximum pages to crawl (default: 20)",
-                    "default": 20
-                }
+                "url": { "type": "string", "description": "Starting URL for the site crawl" },
+                "query": { "type": "string", "description": "Search keyword to find across pages" },
+                "max_depth": { "type": "integer", "description": "Maximum crawl depth (default: 2)", "default": 2 },
+                "max_pages": { "type": "integer", "description": "Maximum pages to crawl (default: 20)", "default": 20 },
+                "render": { "type": "boolean", "description": "Use headless Chrome for SPA sites", "default": false },
+                "proxy": { "type": "string", "description": "SOCKS5 proxy for Tor/.onion" }
             },
             "required": ["url", "query"]
+        }
+    })
+}
+
+fn tool_schema_screenshot() -> Value {
+    serde_json::json!({
+        "name": "screenshot",
+        "description": "Take a full-page screenshot of a URL using headless Chrome. Returns base64-encoded PNG. Supports Tor proxy.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "The URL to screenshot" },
+                "proxy": { "type": "string", "description": "SOCKS5 proxy for Tor/.onion" },
+                "wait_ms": { "type": "integer", "description": "Wait time for JS rendering (default: 1500ms)", "default": 1500 }
+            },
+            "required": ["url"]
+        }
+    })
+}
+
+fn tool_schema_render_batch() -> Value {
+    serde_json::json!({
+        "name": "render_batch",
+        "description": "Render multiple URLs in parallel using headless Chrome. Returns content for all pages. Use for high-performance parallel SPA crawling.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "urls": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "List of URLs to render in parallel"
+                },
+                "proxy": { "type": "string", "description": "SOCKS5 proxy for Tor/.onion" },
+                "wait_ms": { "type": "integer", "description": "Wait time per page (default: 1500ms)", "default": 1500 },
+                "max_concurrent": { "type": "integer", "description": "Max parallel tabs (default: 5)", "default": 5 }
+            },
+            "required": ["urls"]
         }
     })
 }
@@ -147,6 +186,22 @@ async fn handle_tool_call(name: &str, args: Value) -> Result<Value, String> {
             serde_json::to_value(&result)
                 .map_err(|e| format!("Serialization error: {e}"))
         }
+        "screenshot" => {
+            let input: tools::ScreenshotInput = serde_json::from_value(args)
+                .map_err(|e| format!("Invalid arguments for screenshot: {e}"))?;
+            let result = tools::exec_screenshot(input).await
+                .map_err(|e| format!("screenshot failed: {e}"))?;
+            serde_json::to_value(&result)
+                .map_err(|e| format!("Serialization error: {e}"))
+        }
+        "render_batch" => {
+            let input: tools::RenderBatchInput = serde_json::from_value(args)
+                .map_err(|e| format!("Invalid arguments for render_batch: {e}"))?;
+            let result = tools::exec_render_batch(input).await
+                .map_err(|e| format!("render_batch failed: {e}"))?;
+            serde_json::to_value(&result)
+                .map_err(|e| format!("Serialization error: {e}"))
+        }
         _ => Err(format!("Unknown tool: {name}")),
     }
 }
@@ -173,7 +228,7 @@ async fn handle_request(req: JsonRpcRequest) -> Option<JsonRpcResponse> {
 
         "notifications/initialized" => {
             eprintln!("[mcp] Client initialized");
-            None // notifications don't get responses
+            None
         }
 
         "tools/list" => {
@@ -181,7 +236,9 @@ async fn handle_request(req: JsonRpcRequest) -> Option<JsonRpcResponse> {
                 "tools": [
                     tool_schema_crawl_url(),
                     tool_schema_extract_content(),
-                    tool_schema_search_site()
+                    tool_schema_search_site(),
+                    tool_schema_screenshot(),
+                    tool_schema_render_batch()
                 ]
             });
             Some(JsonRpcResponse::success(id.unwrap_or(Value::Null), result))
@@ -221,7 +278,6 @@ async fn handle_request(req: JsonRpcRequest) -> Option<JsonRpcResponse> {
             }
         }
 
-        // Ignore unknown notifications
         method if method.starts_with("notifications/") => {
             eprintln!("[mcp] Ignoring notification: {method}");
             None
@@ -237,7 +293,8 @@ async fn handle_request(req: JsonRpcRequest) -> Option<JsonRpcResponse> {
 // ─── Main loop ───
 
 pub async fn run_mcp_server() -> Result<()> {
-    eprintln!("[mcp] cofoundry-crawl MCP server starting (stdio)");
+    eprintln!("[mcp] cofoundry-crawl v{} MCP server starting (stdio)", env!("CARGO_PKG_VERSION"));
+    eprintln!("[mcp] Tools: crawl_url, extract_content, search_site, screenshot, render_batch");
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
