@@ -20,10 +20,12 @@ impl Frontier {
         self.queue.pop_front()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.queue.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }

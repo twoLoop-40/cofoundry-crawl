@@ -22,6 +22,7 @@ impl Dedup {
         self.seen.insert(url.to_string());
     }
 
+    #[allow(dead_code)]
     pub fn count(&self) -> usize {
         self.seen.len()
     }

@@ -8,6 +8,7 @@ pub struct CrawlConfig {
     pub timeout: Duration,
     pub rate_limit_per_second: u32,
     pub user_agents: Vec<String>,
+    #[allow(dead_code)]
     pub respect_robots_txt: bool,
     pub follow_redirects: bool,
     pub max_redirects: usize,

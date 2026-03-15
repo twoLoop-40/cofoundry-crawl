@@ -9,6 +9,7 @@ pub struct FetchResponse {
     pub body: String,
     pub content_type: Option<String>,
     pub content_length: Option<u64>,
+    #[allow(dead_code)]
     pub final_url: String,
 }
 

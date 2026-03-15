@@ -1,4 +1,4 @@
-use crate::config::{CrawlConfig, CrawlResult, SiteCrawlResult};
+use crate::config::{CrawlConfig, CrawlResult};
 use crate::crawler::Crawler;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
