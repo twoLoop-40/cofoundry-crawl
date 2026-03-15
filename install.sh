@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# cofoundry-crawl installer — downloads binary + registers as Claude Code MCP server
+# cofoundry-crawl installer — binary + MCP registration + Claude Code skills
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/twoLoop-40/cofoundry-crawl/main/install.sh | bash
 #   # or with a specific version:
-#   curl -fsSL ... | bash -s -- v0.2.0
+#   curl -fsSL ... | bash -s -- v0.3.0
 
 set -euo pipefail
 
@@ -12,6 +12,8 @@ REPO="twoLoop-40/cofoundry-crawl"
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY_NAME="cofoundry-crawl"
 MCP_CONFIG="${HOME}/.claude/.mcp.json"
+SKILLS_DIR="${HOME}/.claude/skills"
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
 # ── Detect platform ──────────────────────────────────────────────────
 detect_platform() {
@@ -118,9 +120,36 @@ MCPEOF
     echo "   Created ${MCP_CONFIG}"
   fi
 
+  # ── Install Claude Code skills ──────────────────────────────────────
   echo ""
-  echo "🎉 Done! Restart Claude Code to use cofoundry-crawl MCP tools."
-  echo "   Tools: login, crawl_url, screenshot, render_batch, search_site, extract_content"
+  echo "📦 Installing Claude Code skills..."
+
+  local skills=("visual-qa" "visual-qa-click" "visual-qa-mosaic" "visual-qa-types")
+  for skill in "${skills[@]}"; do
+    local skill_dir="${SKILLS_DIR}/${skill}"
+    mkdir -p "${skill_dir}"
+    curl -fsSL -o "${skill_dir}/SKILL.md" "${RAW_BASE}/.claude/skills/${skill}/SKILL.md" 2>/dev/null \
+      && echo "   ✅ ${skill}" \
+      || echo "   ⚠️ ${skill} (download failed, skip)"
+  done
+
+  # visual-qa sources (Playwright crawlers)
+  local sources=("index.ts" "spa-crawl.ts" "click-crawl.ts" "mosaic-crawl.ts" "credential-prompt.ts" "package.json")
+  mkdir -p "${SKILLS_DIR}/visual-qa/sources"
+  for src in "${sources[@]}"; do
+    curl -fsSL -o "${SKILLS_DIR}/visual-qa/sources/${src}" \
+      "${RAW_BASE}/.claude/skills/visual-qa/sources/${src}" 2>/dev/null || true
+  done
+  echo "   ✅ visual-qa/sources (${#sources[@]} files)"
+
+  echo ""
+  echo "🎉 Done! Restart Claude Code to use cofoundry-crawl."
+  echo ""
+  echo "   MCP tools: login, crawl_url, screenshot, render_batch, search_site, extract_content"
+  echo "   Skills:    /visual-qa, /visual-qa-click, /visual-qa-mosaic"
+  echo ""
+  echo "   Quick start:"
+  echo "     /visual-qa generate https://example.com"
 }
 
 main "$@"
