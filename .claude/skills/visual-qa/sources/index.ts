@@ -13,7 +13,13 @@ import * as path from 'path';
 // ── CLI args ────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
-const startUrl = args.find(a => !a.startsWith('--')) || 'http://localhost:5173';
+const startUrl = args.find(a => !a.startsWith('--'));
+
+if (!startUrl) {
+  console.error('Usage: npx tsx src/index.ts <url> [options]');
+  console.error('  Example: npx tsx src/index.ts http://localhost:3000 --depth=3');
+  process.exit(1);
+}
 
 function getArg(name: string, defaultVal: string): string {
   const found = args.find(a => a.startsWith(`--${name}=`));

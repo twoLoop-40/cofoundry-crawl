@@ -119,7 +119,7 @@ async function login(page: Page, origin: string, opts: ReturnType<typeof parseAr
 }
 
 // ── Auto-discover clickable elements ──
-// Uses string-based evaluate to avoid esbuild __name injection (bug #35)
+// Uses string-based evaluate for serialization safety (avoids bundler name injection issues)
 async function discoverTargets(page: Page): Promise<ClickTarget[]> {
   return page.evaluate(`(() => {
     const seen = new Set();

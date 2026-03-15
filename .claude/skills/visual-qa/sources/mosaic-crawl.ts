@@ -84,7 +84,7 @@ async function login(page: Page, origin: string, opts: ReturnType<typeof parseAr
 }
 
 // ── DOM structure extraction ──
-// Uses string-based evaluate to avoid esbuild __name injection (bug #35)
+// Uses string-based evaluate for serialization safety (avoids bundler name injection issues)
 async function extractDomStructure(page: Page) {
   return page.evaluate(`(() => {
     const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((el) => ({
@@ -126,7 +126,7 @@ async function captureMosaic(
   await page.screenshot({ path: path.join(ssDir, '00-full-page.png'), fullPage: true });
   console.log('  ✅ Full page');
 
-  // Page metrics — string-based evaluate to avoid esbuild __name injection (bug #35)
+  // Page metrics — string-based evaluate for serialization safety
   const totalHeight = await page.evaluate(`document.body.scrollHeight`) as number;
   const totalWidth = await page.evaluate(`document.body.scrollWidth`) as number;
   console.log(`  Page: ${totalWidth}x${totalHeight}px`);

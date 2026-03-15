@@ -162,14 +162,22 @@ npx tsx src/spa-crawl.ts <url> --auth-email=... --auth-password=...
 
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
-| `--depth=N` | 3 | 최대 크롤링 깊이 |
-| `--max-pages=N` | 100 | 최대 페이지 수 |
+| `--depth=N` | 3 | 최대 크롤링 깊이 (index.ts BFS) |
+| `--max-pages=N` | 100 | 최대 페이지 수 (index.ts BFS) |
 | `--output=DIR` | ./output | 결과 디렉토리 |
 | `--timeout=MS` | 30000 | 페이지당 타임아웃 |
 | `--auth-email=STR` | (auto) | 로그인 이메일/유저명 |
 | `--auth-password=STR` | (auto) | 로그인 비밀번호 |
 | `--login-url=URL` | `<origin>/login` | 로그인 페이지 URL |
 | `--no-prompt` | false | Playwright UI 프롬프트 비활성화 |
+| `--routes=FILE` | (auto-discover) | JSON 라우트 목록 (spa-crawl 전용) |
+| `--detail-pattern=STR` | - | 디테일 페이지 패턴 (e.g., `/items/{id}`) |
+| `--api-pattern=STR` | `/api/,/auth/` | API 인터셉트 URL 패턴 (콤마 구분) |
+
+**SPA 라우트 발견**: `spa-crawl.ts`는 `--routes` 미지정 시 로그인 후 nav/sidebar 링크를 자동 스캔하여 라우트를 발견합니다. 특정 라우트만 크롤하려면 JSON 파일로 지정:
+```json
+["/", "/dashboard", "/settings", "/users"]
+```
 
 ### Phase 2: `/visual-qa run` — AI 분석 + Spec 생성
 
