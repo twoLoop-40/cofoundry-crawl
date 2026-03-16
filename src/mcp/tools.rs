@@ -108,6 +108,11 @@ pub struct LoginInput {
     pub proxy: Option<String>,
     #[serde(default = "default_wait_ms")]
     pub wait_ms: u64,
+    /// localStorage key name for SPA auth injection (e.g., "myapp-auth").
+    /// If provided, the JWT response is stored in localStorage under this key.
+    /// If omitted, only HTTP cookies are returned (no localStorage injection).
+    #[serde(default)]
+    pub ls_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -219,6 +224,7 @@ pub async fn exec_login(input: LoginInput) -> Result<LoginOutput> {
         input.proxy.as_deref(),
         input.wait_ms,
         input.api_url.as_deref(),
+        input.ls_key.as_deref(),
     ).await?;
 
     Ok(LoginOutput {

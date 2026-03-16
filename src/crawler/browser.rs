@@ -195,10 +195,17 @@ async fn inject_auth_and_navigate(browser: &Arc<Browser>, url: &str, cookies: &[
             }
         }
 
-        // Verify injection
-        let verify = setup_page.evaluate("localStorage.getItem('safeintelligence-auth')?.length || 0").await
-            .ok().and_then(|v| v.into_value::<i64>().ok()).unwrap_or(0);
-        info!(ls_length = verify, "localStorage injected in setup tab");
+        // Verify injection — check that at least one localStorage item was set
+        let ls_keys: Vec<&str> = cookies.iter()
+            .filter(|c| c.domain.as_deref() == Some("localStorage"))
+            .map(|c| c.name.as_str())
+            .collect();
+        if let Some(first_key) = ls_keys.first() {
+            let js = format!("localStorage.getItem({})?.length || 0", serde_json::to_string(first_key).unwrap_or_default());
+            let verify = setup_page.evaluate(js).await
+                .ok().and_then(|v| v.into_value::<i64>().ok()).unwrap_or(0);
+            info!(ls_key = first_key, ls_length = verify, "localStorage injected in setup tab");
+        }
 
         // Close setup tab
         let _ = setup_page.close().await;
@@ -378,6 +385,7 @@ pub async fn login_and_get_cookies(
     proxy: Option<&str>,
     _wait_ms: u64,
     api_url_override: Option<&str>,
+    ls_key: Option<&str>,
 ) -> Result<(Vec<crate::mcp::tools::CookieInfo>, String)> {
     // Parse the login URL to determine the API base
     let parsed = url::Url::parse(login_url)
@@ -440,34 +448,42 @@ pub async fn login_and_get_cookies(
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    // Build Zustand-compatible auth state for localStorage injection
-    let user_data = token_data.get("user").cloned().unwrap_or(serde_json::Value::Null);
-    let workspaces = token_data.get("workspaces").cloned().unwrap_or(serde_json::json!([]));
-    let active_workspace = token_data.get("active_workspace").cloned();
+    // Build cookies/localStorage entries from the login response
+    let mut cookies = Vec::new();
 
-    let zustand_state = serde_json::json!({
-        "state": {
-            "user": user_data,
-            "accessToken": access_token,
-            "refreshToken": refresh_token,
-            "isAuthenticated": true,
-            "isLoading": false,
-            "error": null,
-            "workspaces": workspaces,
-            "activeWorkspace": active_workspace
-        },
-        "version": 0
-    });
+    // If ls_key is provided, store the full JWT response in localStorage
+    // using a Zustand-compatible wrapper (works with persist middleware)
+    if let Some(key) = ls_key {
+        let zustand_state = serde_json::json!({
+            "state": {
+                "accessToken": access_token,
+                "refreshToken": refresh_token,
+                "isAuthenticated": true,
+                "isLoading": false,
+                "error": null,
+                // Include any extra fields from the login response
+                "user": token_data.get("user").cloned().unwrap_or(serde_json::Value::Null),
+            },
+            "version": 0
+        });
 
-    let cookies = vec![
-        crate::mcp::tools::CookieInfo {
-            name: "safeintelligence-auth".to_string(),
+        cookies.push(crate::mcp::tools::CookieInfo {
+            name: key.to_string(),
             value: serde_json::to_string(&zustand_state).unwrap_or_default(),
             domain: "localStorage".to_string(),
             path: String::new(),
-        },
-    ];
+        });
+    }
 
-    info!(token_len = access_token.len(), "API login successful");
+    // Always include the access token as an HTTP-only cookie fallback
+    // (useful for apps that use cookie-based auth instead of localStorage)
+    cookies.push(crate::mcp::tools::CookieInfo {
+        name: "access_token".to_string(),
+        value: access_token.to_string(),
+        domain: parsed.host_str().unwrap_or("localhost").to_string(),
+        path: "/".to_string(),
+    });
+
+    info!(token_len = access_token.len(), ls_key = ?ls_key, "API login successful");
     Ok((cookies, format!("{origin}{port}/")))
 }
